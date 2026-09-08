@@ -36,6 +36,7 @@
 | Rev | Date       | Author     | Change Description                            |
 | --- | ---------- | ---------- | --------------------------------------------- |
 | 0.1 | 2026-05-23 | David Zagury | Initial version - TAM tel_type MIXED mode  |
+| 0.2 | 2026-09-08 | David Zagury | §7.1 selection rule: prefer MIXED_TYPE over SINGLE_TYPE when both are advertised, to minimize SAI object count/memory footprint (per §11) |
 
 ## 2. Scope
 
@@ -88,11 +89,11 @@ Selection rules:
 | Advertised values                | Selected mode | HFT enabled |
 | -------------------------------- | ------------- | ----------- |
 | `SINGLE_TYPE`                    | SINGLE_TYPE   | yes         |
-| `SINGLE_TYPE` and `MIXED_TYPE`   | SINGLE_TYPE   | yes         |
+| `SINGLE_TYPE` and `MIXED_TYPE`   | MIXED_TYPE    | yes         |
 | `MIXED_TYPE` only                | MIXED_TYPE    | yes         |
 | neither                          | -             | no (logged) |
 
-SINGLE_TYPE is preferred when both are advertised so that the behavior of all existing platforms is unchanged. This is consistent with the SAI specification, which declares `SAI_TAM_TEL_TYPE_MODE_SINGLE_TYPE` as the default value of `SAI_TAM_TEL_TYPE_ATTR_MODE`.
+MIXED_TYPE is preferred whenever it is advertised, including on platforms that also advertise SINGLE_TYPE. In MIXED mode the orchagent holds one `sai_tam_tel_type` and one `sai_tam_report` per profile instead of up to four of each (§11), so preferring MIXED whenever the vendor supports it minimizes SAI object count and memory footprint even on platforms where SINGLE_TYPE would also work. This departs from the SAI specification's default of `SAI_TAM_TEL_TYPE_MODE_SINGLE_TYPE` for `SAI_TAM_TEL_TYPE_ATTR_MODE`; the default only applies when a platform does not explicitly select a mode, and the orchagent always makes an explicit choice via `SAI_TAM_TEL_TYPE_ATTR_MODE` at create time.
 
 ### 7.2. HFTelProfile data structures
 
@@ -196,7 +197,7 @@ sequenceDiagram
         participant syncd
     end
 
-    Note over hft_orch,syncd: New step - query SAI_TAM_TEL_TYPE_ATTR_MODE enum capability and pick the mode for the orchagent lifetime. Prefer SINGLE when both are advertised.
+    Note over hft_orch,syncd: New step - query SAI_TAM_TEL_TYPE_ATTR_MODE enum capability and pick the mode for the orchagent lifetime. Prefer MIXED when both are advertised.
 
     config_db ->> hft_orch: HIGH_FREQUENCY_TELEMETRY_PROFILE
     config_db ->> hft_orch: HIGH_FREQUENCY_TELEMETRY_GROUP
@@ -253,7 +254,7 @@ sequenceDiagram
 
     counter --> counter: Initialize genetlink
 
-    Note over hft_orch,syncd: [MIXED] New step before init - query SAI_TAM_TEL_TYPE_ATTR_MODE enum capability and pick the mode for the orchagent lifetime. Prefer SINGLE when both are advertised.
+    Note over hft_orch,syncd: [MIXED] New step before init - query SAI_TAM_TEL_TYPE_ATTR_MODE enum capability and pick the mode for the orchagent lifetime. Prefer MIXED when both are advertised.
     hft_orch ->> syncd: Initialize <br/>HOSTIF<br/>TAM_TRANSPORT<br/>TAM_collector<br/>
 
     config_db ->> hft_orch: HIGH_FREQUENCY_TELEMETRY_PROFILE
@@ -361,7 +362,7 @@ Vendor-specific limitations inherited from the underlying SAI implementation. Th
 
 Implemented in `sonic-swss/tests/mock_tests/`:
 
-- Mode selection: mock `sai_query_attribute_enum_values_capability` to return (a) SINGLE only, (b) MIXED only, (c) both, (d) neither. Assert that `HFTelOrch` selects SINGLE in (a) and (c), MIXED in (b), and disables HFT in (d).
+- Mode selection: mock `sai_query_attribute_enum_values_capability` to return (a) SINGLE only, (b) MIXED only, (c) both, (d) neither. Assert that `HFTelOrch` selects SINGLE in (a), MIXED in (b) and (c), and disables HFT in (d).
 - MIXED mode SAI calls: assert exactly one `create_tam_tel_type` and one `create_tam_report` call per profile, with `SAI_TAM_TEL_TYPE_ATTR_MODE = SAI_TAM_TEL_TYPE_MODE_MIXED_TYPE` and all three `SAI_TAM_TEL_TYPE_ATTR_SWITCH_ENABLE_*_STATS` set to `true`.
 - MIXED mode state machine: assert that `STOP_STREAM → CREATE_CONFIG` is not issued until every configured object type is ready, and is issued exactly once when the last one becomes ready.
 - MIXED mode template propagation: with two groups configured (e.g. PORT and QUEUE), assert that the same combined IPFIX template buffer is written to both `HIGH_FREQUENCY_TELEMETRY_SESSION|profile|PORT` and `HIGH_FREQUENCY_TELEMETRY_SESSION|profile|QUEUE` entries.
